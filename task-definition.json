@@ -1,0 +1,46 @@
+{
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "inferenceAccelerators": [],
+  "containerDefinitions": [
+    {
+      "name": "ecs-simple-engine",
+      "image": "ecs-simple-engine-repository:latest",
+      "resourceRequirements": null,
+      "memory": "128",
+      "cpu": "100",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": "8080",
+          "protocol": "tcp"
+        }
+
+      ]
+    },
+    {
+      "name": "ecs-simple-engine-db",
+      "image": "ecs-simple-engine-db-repository:latest",
+      "resourceRequirements": null,
+      "memory": "128",
+      "cpu": "100",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": "3306",
+          "protocol": "tcp"
+        }
+
+      ]
+    }
+  ],
+  "volumes": [],
+  "networkMode": "awsvpc",
+  "memory": "512",
+  "cpu": "256",
+  "executionRoleArn": "arn:aws:iam::<<account_id>>:role/<<execution-role-name>>",
+  "family": "ecs-simple-engine-task-definition",
+  "taskRoleArn": "",
+  "placementConstraints": []
+}

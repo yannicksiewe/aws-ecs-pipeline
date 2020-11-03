@@ -1,4 +1,4 @@
-name: Java CI with Maven
+name: Build and Deploy to AWS ECS
 on:
   push:
     branches: [ main ]
@@ -6,6 +6,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, 'ci skip')"
 
     steps:
       - uses: actions/checkout@v2
@@ -22,20 +23,91 @@ jobs:
           path: ~/.m2
           key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
           restore-keys: |
-            ${{ runner.os }}-m2-
+            ${{ runner.os }}-m2
 
       - name: Build with Maven
+        run: mvn clean install
+
+      - name: Create Staging folder
+        id: copy-files
         run: |
-          pwd
-          mvn clean install
+          mkdir staging
+          projects=("target")
+          for i in "${!projects[@]}";
+            do
+            cp ./${projects[$i]}/*.jar staging
+          done
 
-      - run: ls -la
-
-      - name: Cache target
-        id: cache-target
-        uses: actions/cache@v2
+      - uses: actions/upload-artifact@v2
         with:
-          path: '/home/runner/work/aws-ecs-pipeline/aws-ecs-pipeline/target'
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-m2-
+          name: Package
+          path: staging
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v1
+
+      - name: Download Package
+        uses: actions/download-artifact@v2
+        with:
+          name: Package
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: 'eu-central-1'
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      # Build and push image to ecr
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          #ECR_REPOSITORY: ["ecs-simple-engine-repository", "ecs-simple-engine-db-repository"]
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          projects=("devops" "mysql")
+          ECR_REPOSITORY=("ecs-simple-engine-repository" "ecs-simple-engine-db-repository")
+          ls -la
+          for i in "${!projects[@]}";
+            do
+            docker build -f ./${projects[$i]}/Dockerfile -t $ECR_REGISTRY/${ECR_REPOSITORY[$i]}:$IMAGE_TAG .
+            docker push $ECR_REGISTRY/${ECR_REPOSITORY[$i]}:$IMAGE_TAG
+            echo "::set-output name=image-${projects[$i]}::$ECR_REGISTRY/${ECR_REPOSITORY[$i]}:$IMAGE_TAG"
+          done
+
+      # Update ECS Task Definition
+      - name: Fill in the new image ID in the Amazon ECS task definition
+        id: simple-engine
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ecs-simple-engine
+          image: ${{ steps.build-image.outputs.image-devops }}
+
+      - name: Update new image ID in the Amazon ECS db task definition
+        id: mysql-db
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ steps.simple-engine.outputs.task-definition }}
+          container-name: ecs-simple-engine-db
+          image: ${{ steps.build-image.outputs.image-mysql }}
+
+      # Deploy to ECS
+      - name: Deploy Amazon ECS task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.mysql-db.outputs.task-definition }}
+          service: ecs-devops-adssi-service
+          cluster: ecs-devops-adssi-cluster
+          wait-for-service-stability: true
