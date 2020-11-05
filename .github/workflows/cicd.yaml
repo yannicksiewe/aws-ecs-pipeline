@@ -108,6 +108,6 @@ jobs:
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
           task-definition: ${{ steps.mysql-db.outputs.task-definition }}
-          service: ecs-devops-adssi-service
-          cluster: ecs-devops-adssi-cluster
+          service: ecs-simple-engine-service
+          cluster: ecs-simple-engine-cluster
           wait-for-service-stability: true
